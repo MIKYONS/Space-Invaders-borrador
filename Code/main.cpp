@@ -1,17 +1,13 @@
-/************************************************************************
-* Programmers: Subham, Ryan, Danielle, Manjesh                          *
-* Class: CptS 122                                                       *
-* Programming Assignment: PA 9 - Space Invaders                         *
-* Date: 4/17/2021                                                       *
-* Description: This program emulates space invaders.                    *
-************************************************************************/
-
 #include "header.hpp"
 #include "Character.hpp"
 #include "User.hpp"
 #include "Enemy.hpp"
 #include "Missile.hpp"
 #include "Menu.hpp"
+#include "Explosion.hpp"
+#include "UFO.hpp"
+#include "Poderes.hpp"
+#include "Patrones.hpp"
 
 void delay(int x);
 void ship_movement(Character& ship, RenderWindow& window);
@@ -50,6 +46,21 @@ int main() {
     Sound missile_sound;
     Sound invader_killed;
     Sound ship_hit;
+    
+    // Fondo y hojas de sprites para explosiones
+    sf::Texture texFondo, texExpShield, texExpShip, texExpBig;
+    texFondo.loadFromFile("Fondo.png");
+    texExpShield.loadFromFile("ExplosionShield.png");
+    texExpShip.loadFromFile("ExplosionShip.png");
+    texExpBig.loadFromFile("ExplosionBig.png");
+
+    sf::Sprite spriteFondo(texFondo);
+    spriteFondo.setScale(
+        float(window.getSize().x) / texFondo.getSize().x,
+        float(window.getSize().y) / texFondo.getSize().y
+    );
+
+    std::vector<Explosion> explosiones;
 
     missile_sound.setBuffer(buffer);
     invader_killed.setBuffer(buffer2);
@@ -98,20 +109,26 @@ int main() {
 
     endMessage.setString("Press enter to continue...");
 
-    t1.loadFromFile("Ship.jpg"); //Loads image
-    Character* ship = new User(Vector2f(425.f, 825.f), t1, Vector2f(0.1f, 0.1f)); //Polymorphism because uer is a character
+    t1.loadFromFile("Ship.png"); //Loads image
+    Character* ship = new User(Vector2f(425.f, 825.f), t1, Vector2f(0.1f, 0.1f)); //Polymorphism because user is a character
 
     Character* enemies[10][5] = { nullptr }; //Allows for matrix of enemies
-    t2.loadFromFile("Alien.jpg");
+    t2.loadFromFile("Alien.png");
+    
+    Texture t2b, t2c;
+    t2b.loadFromFile("Alien2.png");
+    t2c.loadFromFile("Alien3.png");
+
+    Texture* tipo[5] = { &t2c, &t2b, &t2b, &t2, &t2 };   // fila 0: calamar, 1-2: pulpo, 3-4: cangrejo
 
     for (int i = 0; i < 10; i++)
         for (int j = 0; j < 5; j++)
-            enemies[i][j] = new Enemy(Vector2f(175.f + 60 * i, 100.f + 50 * j), t2, Vector2f(0.75f, 0.75f));
+            enemies[i][j] = new Enemy(Vector2f(175.f + 60 * i, 125.f + 50 * j), *tipo[j], Vector2f(0.047f, 0.047f));
 
-    t3.loadFromFile("Missile.jpg");
+    t3.loadFromFile("Missile.png");
     vector<Missile*> missiles; //Keeps track of user missiles on the screen
 
-    t4.loadFromFile("enemyMissile.jpg");
+    t4.loadFromFile("enemyMissile.png");
     vector<Missile*> enemyM; //Keeps track of enemy missiles on the screen
 
     //Helper variables for insertion into the vectors
@@ -123,10 +140,10 @@ int main() {
     vector<Texture> shieldT2;
     vector<Texture> shieldT3;
 
-    t5.loadFromFile("Shield1.jpg");
-    t6.loadFromFile("Shield2.jpg");
-    t7.loadFromFile("Shield3.jpg");
-    t8.loadFromFile("Shield4.jpg");
+    t5.loadFromFile("Shield1.png");
+    t6.loadFromFile("Shield2.png");
+    t7.loadFromFile("Shield3.png");
+    t8.loadFromFile("Shield4.png");
 
     //Inserts the cycle of textures
     shieldT1.push_back(t5);
@@ -154,6 +171,43 @@ int main() {
     shieldS1.setScale(Vector2f(0.5f, 0.5f));
     shieldS2.setScale(Vector2f(0.5f, 0.5f));
     shieldS3.setScale(Vector2f(0.5f, 0.5f));
+    
+    // Cargar la textura del UFO especial y volver transparente su fondo blanco
+    sf::Image imgUfo;
+    Texture t_ufo;
+    if (imgUfo.loadFromFile("UFO.png")) {
+        imgUfo.createMaskFromColor(sf::Color::White);
+        t_ufo.loadFromImage(imgUfo);
+    }
+
+    // Instanciar el UFO inicialmente inactivo fuera de la pantalla
+    UFO* ufoEspecial = new UFO(Vector2f(-100.f, -100.f), t_ufo, Vector2f(0.06f, 0.06f)); 
+    bool ufoSpawned = false; // Asegura que solo se genere una vez al llegar a 666 score
+
+    // ---- Poderes de la nave y patrones de enemigos por nivel ----
+    sf::Texture texPoderes;
+    texPoderes.loadFromFile("Poderes.png");
+    EstadoPoderes poderes;      // poderes que caen de los enemigos
+    PatronEnemigo patron;       // movimiento de la formación (cambia con el nivel)
+    SistemaAtaques ataques;     // disparos enemigos (más tipos y más seguidos cada nivel)
+
+    // Los tres escudos en arreglos, para tratarlos con un ciclo
+    Sprite* escudos[3]         = { &shieldS1, &shieldS2, &shieldS3 };
+    vector<Texture>* ciclos[3] = { &shieldT1, &shieldT2, &shieldT3 };
+    int* cambios[3]            = { &tChange1, &tChange2, &tChange3 };
+
+    Text infoT;                 // patrón actual, ataques y poderes activos
+    infoT.setFont(font);
+    infoT.setCharacterSize(18);
+    infoT.setFillColor(Color(200, 220, 255));
+    infoT.setPosition(Vector2f(75.f, 32.f));
+
+    CircleShape campo(60.f, 8); // octágono: campo de fuerza "pixelado"
+    campo.setOrigin(60.f, 60.f);
+    campo.setScale(1.0f, 0.62f);
+    campo.setFillColor(Color(120, 210, 255, 45));
+    campo.setOutlineColor(Color(120, 210, 255, 220));
+    campo.setOutlineThickness(3.f);
 
     while (window.isOpen()) {
         Event event;
@@ -194,7 +248,7 @@ int main() {
             //Resets position
             for (int i = 0; i < 10; i++)
                 for (int j = 0; j < 5; j++)
-                    enemies[i][j]->setPosition(Vector2f(175.f + 60 * i, 100.f + 50 * j));
+                    enemies[i][j]->setPosition(Vector2f(175.f + 60 * i, 125.f + 50 * j));
 
             //Makes each enemy alive
             for (int i = 0; i < 10; i++)
@@ -202,6 +256,8 @@ int main() {
                     dynamic_cast <Enemy*> (enemies[i][j])->reset();
 
             reset_check = false;
+            patron.reiniciar();
+            ataques.reiniciar();
         }
 
         //Updates statistics real-time
@@ -213,50 +269,166 @@ int main() {
         ship_movement(*ship, window);
 
         //Generates new missiles every 0.375 seconds or when user presses space, whichever is longest in time passed
-        if (Keyboard::isKeyPressed(Keyboard::Space) && c.getElapsedTime().asSeconds() > 0.375) {
-            missile = new Missile(Vector2f(ship->getPosition().x + 34, ship->getPosition().y - 40), t3, Vector2f(0.1f, 0.1f));
-            missiles.push_back(missile);
+        if (Keyboard::isKeyPressed(Keyboard::Space) && c.getElapsedTime().asSeconds() > (poderes.rapido() ? 0.15f : 0.375f)) {
+            dispararJugador(*ship, missiles, t3, poderes.triple()); //Un misil, o tres con el poder TRIPLE
             c.restart();
             missile_sound.play();
         }
 
         //Generates new enemy missiles, which get faster each level
-        if (c2.getElapsedTime().asMilliseconds() > 1075 - level * 75) {
-            int x_coor = rand() % 10, y_coor = rand() % 5; //Randomly picks an enemy to shoot
-            while (!(dynamic_cast <Enemy*> (enemies[x_coor][y_coor]))->isAlive()) //Makes sure the enemy is alive
-                x_coor = rand() % 10, y_coor = rand() % 5;
-            enemyMi = new Missile(Vector2f(enemies[x_coor][y_coor]->getPosition().x + 7, enemies[x_coor][y_coor]->getPosition().y), t4, Vector2f(0.05f, 0.05f));
-            enemyM.push_back(enemyMi);
-            c2.restart();
-        }
+        //Ataques enemigos: cada nivel suma tipos nuevos y más atacantes (ver Patrones.hpp)
+        ataques.actualizar(enemies, enemyM, t4, *ship, level);
 
         //If there are missiles, they move
         missile_movement(missiles, enemyM);
 
-        //When a live enemy hits a border, they change directions and go down
-        for (int i = 0; i < 10; i++)
-            for (int j = 0; j < 5; j++)
-                if ((dynamic_cast <Enemy*> (enemies[i][j]))->isAlive() && (enemies[i][j]->getPosition().x > 915 || enemies[i][j]->getPosition().x < 0)) {
-                    dir = !dir; //Changes direction
-                    for (int i = 0; i < 10; i++)
-                        for (int j = 0; j < 5; j++)
-                            enemies[i][j]->move(Vector2f(0.f, (float)(9 + level))); //Moves enemies downward
+        //Movimiento de la formación: cada nivel usa un patrón distinto (ver Patrones.hpp)
+        patron.actualizar(enemies, level);
 
-                    goto escape2;
-                }
+        // Activar y actualizar el UFO especial al alcanzar 666 de score
+        if (score >= 666 && !ufoSpawned) {
+            ufoEspecial->spawn();
+            ufoSpawned = true;
+        }
 
-    escape2:
-        for (int i = 0; i < 10; i++)
-            for (int j = 0; j < 5; j++) {
-                if (dir) //Right direction and speed depends on level
-                    enemies[i][j]->move(Vector2f((float)(0.1 + (level * 0.02)), 0.f));
-                else //Left direction
-                    enemies[i][j]->move(Vector2f((float)(-0.1 - (level * 0.02)), 0.f));
+        if (ufoEspecial->isAlive()) {
+            ufoEspecial->update(1.0f + (level * 0.1f));
+        }
+
+        // Colisiones de misiles del jugador contra el UFO y los enemigos
+        for (size_t k = 0; k < missiles.size(); ) {
+            bool impacto = false;
+
+            if (ufoEspecial->isAlive() && ufoEspecial->getGlobalBounds().intersects(missiles.at(k)->getGlobalBounds())) {
+                sf::Vector2f posImpacto = ufoEspecial->getPosition();
+                ufoEspecial->kill();
+                invader_killed.play();
+                explosiones.emplace_back(texExpBig, 10, posImpacto, 60);
+                poderes.soltar(texPoderes, posImpacto, 100); // el UFO siempre suelta un poder
+                score += 300;
+                impacto = true;
             }
 
-        window.clear();
+            for (int i = 0; i < 10 && !impacto; i++)
+                for (int j = 0; j < 5 && !impacto; j++) {
+                    Enemy* en = dynamic_cast <Enemy*> (enemies[i][j]);
+                    if (en->isAlive() && en->getGlobalBounds().intersects(missiles.at(k)->getGlobalBounds())) {
+                        en->kill();
+                        invader_killed.play();
+                        poderes.soltar(texPoderes, en->getPosition(), 14); // 14 % de soltar un poder
+                        score += level * 10;
+                        impacto = true;
+                    }
+                }
 
-        //Draw statistics
+            if (impacto) {
+                delete missiles.at(k);
+                missiles.erase(missiles.begin() + k);
+            }
+            else
+                k++;
+        }
+        limpiarFuera(missiles); //Quita los misiles que salen de la pantalla (también por los lados)
+
+        // Colisiones de misiles enemigos contra la nave y los escudos
+        for (size_t i = 0; i < enemyM.size(); ) {
+            Missile* em = enemyM.at(i);
+            bool consumido = false;
+
+            // Si un misil enemigo golpea la nave
+            if (lives > 0 && em->getGlobalBounds().intersects(ship->getGlobalBounds())) {
+                consumido = true;
+                sf::Vector2f centroNave(ship->getPosition().x + 52.f, ship->getPosition().y + 30.f);
+
+                if (poderes.escudo()) {
+                    // El campo de fuerza absorbe el misil
+                    explosiones.emplace_back(texExpShield, 6, em->getPosition(), 40);
+                }
+                else if (poderes.tInvul <= 0.f) {
+                    lives--;
+                    ship_hit.play();
+                    poderes.tInvul = 1.2f; // breve invulnerabilidad tras recibir un golpe
+
+                    sf::Vector2f centro = centroNave;
+                    if (lives > 0) {
+                        // Explosión roja normal sobre la nave
+                        explosiones.emplace_back(texExpShip, 6, centro, 55);
+                    } else {
+                        // Desintegración grande cuando matan la nave
+                        explosionBloqueante(window, spriteFondo, texExpBig, 10, centro, 80, [&]() {
+                            window.draw(scoreT);
+                            window.draw(livesT);
+                            window.draw(levelT);
+                            window.draw(shieldS1);
+                            window.draw(shieldS2);
+                            window.draw(shieldS3);
+                            for (int ei = 0; ei < 10; ei++)
+                                for (int ej = 0; ej < 5; ej++)
+                                    if ((dynamic_cast <Enemy*> (enemies[ei][ej]))->isAlive())
+                                        window.draw(*enemies[ei][ej]);
+                        });
+                    }
+                }
+                // (con invulnerabilidad el misil se pierde sin hacer daño)
+            }
+
+            // Si golpea alguno de los escudos (explosión roja con amarillo)
+            for (int s = 0; s < 3 && !consumido; s++) {
+                if (*cambios[s] <= 3 && em->getGlobalBounds().intersects(escudos[s]->getGlobalBounds())) {
+                    explosiones.emplace_back(texExpShield, 6, em->getPosition(), 50);
+                    escudos[s]->setTexture(ciclos[s]->at(*cambios[s]));
+                    (*cambios[s])++;
+                    consumido = true;
+                }
+            }
+
+            if (consumido) {
+                delete em;
+                enemyM.erase(enemyM.begin() + i);
+            }
+            else
+                i++;
+        }
+        limpiarFuera(enemyM); //Quita los misiles que salen de la pantalla (también por los lados)
+
+        // Colisiones de enemigos contra el límite inferior o los escudos
+        for (int i = 0; i < 10; i++) {
+            for (int j = 0; j < 5; j++) {
+                Enemy* en = dynamic_cast <Enemy*> (enemies[i][j]);
+                if (!en->isAlive())
+                    continue;
+
+                //Si un enemigo llega a y = 900 el jugador pierde automáticamente
+                if (en->getPosition().y + 50 >= 900)
+                    lives = 0;
+
+                //Si un enemigo toca un escudo, muere y el escudo recibe daño
+                for (int s = 0; s < 3; s++) {
+                    if (*cambios[s] <= 3 && en->getGlobalBounds().intersects(escudos[s]->getGlobalBounds())) {
+                        en->kill();
+                        escudos[s]->setTexture(ciclos[s]->at(*cambios[s]));
+                        (*cambios[s])++;
+                        explosiones.emplace_back(texExpShield, 6, en->getPosition(), 50);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Poderes: caen, la nave los recoge y se aplican
+        {
+            std::vector<TipoPoder> recogidos = poderes.actualizar(*ship);
+            for (size_t k = 0; k < recogidos.size(); k++)
+                aplicarPoder(recogidos[k], poderes, lives, score, level, enemies, explosiones, texExpShield);
+        }
+
+        // Actualizar animaciones de explosiones activas
+        actualizarExplosiones(explosiones);
+
+        // Dibujar toda la escena
+        window.clear();
+        window.draw(spriteFondo);
+
         window.draw(scoreT);
         window.draw(livesT);
         window.draw(levelT);
@@ -265,107 +437,36 @@ int main() {
         window.draw(shieldS2);
         window.draw(shieldS3);
 
-        //Draws missiles if there are any on the screen
         draw_missiles(missiles, enemyM, window);
 
-        window.draw(*ship);
+        if (lives > 0) {
+            //Parpadea mientras dura la invulnerabilidad tras un golpe
+            if (poderes.tInvul <= 0.f || (int)(poderes.tInvul * 12) % 2 == 0)
+                window.draw(*ship);
+
+            if (poderes.escudo()) {
+                campo.setPosition(ship->getPosition().x + 52.f, ship->getPosition().y + 25.f);
+                window.draw(campo);
+            }
+        }
 
         for (int i = 0; i < 10; i++)
             for (int j = 0; j < 5; j++)
                 if ((dynamic_cast <Enemy*> (enemies[i][j]))->isAlive())
-                    window.draw(*enemies[i][j]); //Draw live enemies
+                    window.draw(*enemies[i][j]);
 
-        if (!missiles.empty()) {
-            for (int i = 0; i < 10; i++) {
-                for (int j = 0; j < 5; j++) {
-                    for (int k = 0; k < missiles.size(); k++) {
-                        //If user missile hits a live enemy with lots of offset and hitboxing
-                        if (!missiles.empty() && (dynamic_cast <Enemy*> (enemies[i][j]))->isAlive() && missiles.at(k)->getPosition().y == enemies[i][j]->getPosition().y && missiles.at(k)->getPosition().x >
-                            enemies[i][j]->getPosition().x - 20 && missiles.at(k)->getPosition().x < enemies[i][j]->getPosition().x + 20) {
-                            missiles.erase(missiles.begin() + k); //Deletes that particular missile
-                            (dynamic_cast <Enemy*> (enemies[i][j]))->kill();
-                            invader_killed.play();
-                            score += level * 10;
-                            goto escape3;
-                        }
-                    }
-                }
-            }
-        escape3:
-            if (!missiles.empty() && missiles.front()->getPosition().y < -100)
-                missiles.erase(missiles.begin()); //Deletes missiles that go off the screen
-        }
+        // Dibujar UFO especial si está activo
+        if (ufoEspecial->isAlive())
+            window.draw(*ufoEspecial);
 
-        try {
-            if (!enemyM.empty()) {
-                for (int i = 0; i < enemyM.size(); i++) {
+        // Poderes que caen y marcador de patrón / ataques / poderes activos
+        for (size_t k = 0; k < poderes.cayendo.size(); k++)
+            window.draw(poderes.cayendo[k].sprite);
 
-                    //If enemy missile hits ship
-                    if (!enemyM.empty() && enemyM.at(i)->getPosition().y == ship->getPosition().y && enemyM.at(i)->getPosition().x > ship->getPosition().x - 20 && enemyM.at(i)->getPosition().x < ship->getPosition().x + 120) {
-                        enemyM.erase(enemyM.begin() + i);
-                        lives--;
-                        ship_hit.play();
-                    }
+        infoT.setString("Patron: " + patron.nombre() + "  Ataques: " + to_string(SistemaAtaques::cantidadTipos(level)) + "   " + poderes.texto());
+        window.draw(infoT);
 
-                    //If enemy missile hits one of the shields
-
-                    if (!enemyM.empty() && enemyM.at(i)->getPosition().y > shieldS1.getPosition().y && enemyM.at(i)->getPosition().x > shieldS1.getPosition().x - 20 && enemyM.at(i)->getPosition().x < shieldS1.getPosition().x + 120 &&
-                        tChange1 <= 3) {
-                        enemyM.erase(enemyM.begin() + i);
-                        shieldS1.setTexture(shieldT1.at(tChange1));
-                        tChange1++;
-                    }
-                    if (!enemyM.empty() && enemyM.at(i)->getPosition().y > shieldS2.getPosition().y && enemyM.at(i)->getPosition().x > shieldS2.getPosition().x - 20 && enemyM.at(i)->getPosition().x < shieldS2.getPosition().x + 120 &&
-                        tChange2 <= 3) {
-                        enemyM.erase(enemyM.begin() + i);
-                        shieldS2.setTexture(shieldT2.at(tChange2));
-                        tChange2++;
-                    }
-                    if (!enemyM.empty() && enemyM.at(i)->getPosition().y > shieldS3.getPosition().y && enemyM.at(i)->getPosition().x > shieldS3.getPosition().x - 20 && enemyM.at(i)->getPosition().x < shieldS3.getPosition().x + 120 &&
-                        tChange3 <= 3) {
-                        enemyM.erase(enemyM.begin() + i);
-                        shieldS3.setTexture(shieldT3.at(tChange3));
-                        tChange3++;
-                    }
-                }
-
-                if (!enemyM.empty() && enemyM.front()->getPosition().y > 1050)
-                    enemyM.erase(enemyM.begin());
-            }
-        }
-
-        catch (...) { //Catches out_of_range error that shouldn't happen in the first place, but it works
-
-        }
-
-        for (int i = 0; i < 10; i++) {
-            for (int j = 0; j < 5; j++) {
-                //If enemies get to y = 900 pixels, the user automatically loses
-                if ((dynamic_cast <Enemy*> (enemies[i][j]))->isAlive() && (dynamic_cast <Enemy*> (enemies[i][j]))->getPosition().y + 50 == 900)
-                    lives = 0;
-
-                //If enemy hits a shield, they die and the shield takes some damage
-
-                if ((dynamic_cast <Enemy*> (enemies[i][j]))->isAlive() && (dynamic_cast <Enemy*> (enemies[i][j]))->getPosition().y == shieldS1.getPosition().y && (dynamic_cast <Enemy*> (enemies[i][j]))->getPosition().x >
-                    shieldS1.getPosition().x - 20 && (dynamic_cast <Enemy*> (enemies[i][j]))->getPosition().x < shieldS1.getPosition().x + 120 && tChange1 <= 3) {
-                    (dynamic_cast <Enemy*> (enemies[i][j]))->kill();
-                    shieldS1.setTexture(shieldT1.at(tChange1));
-                    tChange1++;
-                }
-                if ((dynamic_cast <Enemy*> (enemies[i][j]))->isAlive() && (dynamic_cast <Enemy*> (enemies[i][j]))->getPosition().y == shieldS2.getPosition().y && (dynamic_cast <Enemy*> (enemies[i][j]))->getPosition().x >
-                    shieldS2.getPosition().x - 20 && (dynamic_cast <Enemy*> (enemies[i][j]))->getPosition().x < shieldS2.getPosition().x + 120 && tChange2 <= 3) {
-                    (dynamic_cast <Enemy*> (enemies[i][j]))->kill();
-                    shieldS2.setTexture(shieldT2.at(tChange2));
-                    tChange2++;
-                }
-                if ((dynamic_cast <Enemy*> (enemies[i][j]))->isAlive() && (dynamic_cast <Enemy*> (enemies[i][j]))->getPosition().y == shieldS3.getPosition().y && (dynamic_cast <Enemy*> (enemies[i][j]))->getPosition().x >
-                    shieldS3.getPosition().x - 20 && (dynamic_cast <Enemy*> (enemies[i][j]))->getPosition().x < shieldS3.getPosition().x + 120 && tChange3 <= 3) {
-                    (dynamic_cast <Enemy*> (enemies[i][j]))->kill();
-                    shieldS3.setTexture(shieldT3.at(tChange3));
-                    tChange3++;
-                }
-            }
-        }
+        dibujarExplosiones(window, explosiones);
 
         window.display();
 
@@ -381,13 +482,15 @@ int main() {
 
     escape4:
         if (next_level || lives == 0) {
-            reset_check = true; //Resets enemies using algorithm on line 181
+            reset_check = true;
+            explosiones.clear();
             scoreEnd.setString("Score: " + to_string(score));
             levelEnd.setString("Level: " + to_string(level));
 
             //Displays statistics until user presses enter
             while (true) {
                 window.clear();
+                window.draw(spriteFondo);
                 window.draw(levelEnd);
                 window.draw(scoreEnd);
                 window.draw(endMessage);
@@ -397,15 +500,18 @@ int main() {
             }
 
         escape5:
+            ufoEspecial->kill();
+            poderes.cayendo.clear();
             if (lives == 0) {
                 indicator = true; //Displays menu again
                 level = 1;
+                ufoSpawned = false;
+                poderes.reiniciar();
             }
             else
                 level++;
 
             //Empties all missiles for next round
-
             while (!missiles.empty())
                 missiles.pop_back();
 
@@ -426,7 +532,6 @@ int main() {
     test_cases:
         if (m.getUserChoice() == 2) {
             //Test case 1
-
             int testMissiles = 0, removeTM = 0, test = 1;
             testCase.setString("Test " + to_string(test) + ": Missile Deletion");
             test++;
@@ -438,7 +543,7 @@ int main() {
                 window.draw(testCase);
 
                 if (c2.getElapsedTime().asMilliseconds() > 1075 && testMissiles < 5) {
-                    missile = new Missile(Vector2f(rand() % 901, 951), t3, Vector2f(0.1f, 0.1f));
+                    missile = new Missile(Vector2f(rand() % 901, 951), t3, Vector2f(0.3f, 0.3f));
                     missiles.push_back(missile);
                     missile_sound.play();
                     testMissiles++;
@@ -461,11 +566,10 @@ int main() {
             }
 
             //Test case 2
-
             testCase.setString("Test " + to_string(test) + ": Ship Loses Life");
             test++;
             lives = 5;
-            enemyMi = new Missile(Vector2f(ship->getPosition().x + 50, ship->getPosition().y - 800), t4, Vector2f(0.05f, 0.05f));
+            enemyMi = new Missile(Vector2f(ship->getPosition().x + 50, ship->getPosition().y - 800), t4, Vector2f(0.3f, 0.3f));
             enemyM.push_back(enemyMi);
             livesT.setPosition(Vector2f(425.f, 50.f));
 
@@ -499,7 +603,6 @@ int main() {
             livesT.setPosition(Vector2f(425.f, 0.f));
 
             //Test case 3
-
             testMissiles = 0, removeTM = 0;
             testCase.setString("Test " + to_string(test) + ": Shield Loses Lives");
             test++;
@@ -509,7 +612,7 @@ int main() {
                 window.draw(testCase);
 
                 if (c2.getElapsedTime().asMilliseconds() > 1075 && testMissiles <= 2) {
-                    enemyMi = new Missile(Vector2f(shieldS2.getPosition().x + 50, shieldS2.getPosition().y - 800), t4, Vector2f(0.05f, 0.05f));
+                    enemyMi = new Missile(Vector2f(shieldS2.getPosition().x + 50, shieldS2.getPosition().y - 800), t4, Vector2f(0.3f, 0.3f));
                     enemyM.push_back(enemyMi);
                     testMissiles++;
                     c2.restart();
@@ -541,7 +644,6 @@ int main() {
             tChange2 = 1;
 
             //Test case 4
-
             testCase.setString("Test " + to_string(test) + ": Enemies move");
             test++;
             dir = true;
@@ -576,7 +678,7 @@ int main() {
                 {
                     for (int i = 0; i < 10; i++)
                         for (int j = 0; j < 5; j++)
-                            enemies[i][j]->setPosition(Vector2f(175.f + 60 * i, 100.f + 50 * j));
+                            enemies[i][j]->setPosition(Vector2f(175.f + 60 * i, 125.f + 50 * j));
 
                     for (int i = 0; i < 10; i++)
                         for (int j = 0; j < 5; j++)
@@ -607,7 +709,7 @@ int main() {
 
                 for (int i = 0; i < 10; i++)
                     for (int j = 0; j < 5; j++)
-                        if (enemies[i][j]->getPosition().x < 0)
+                        if (enemies[i][j]->getPosition().x < 35)
                             goto test_escape3;
 
                 window.display();
@@ -619,7 +721,6 @@ int main() {
             dir = true;
 
             //Test case 5
-
             testMissiles = 0, removeTM = 0;
             testCase.setString("Test " + to_string(test) + ": Enemies Shoot Randomly");
 
@@ -653,7 +754,7 @@ int main() {
                 {
                     for (int i = 0; i < 10; i++)
                         for (int j = 0; j < 5; j++)
-                            enemies[i][j]->setPosition(Vector2f(175.f + 60 * i, 100.f + 50 * j));
+                            enemies[i][j]->setPosition(Vector2f(175.f + 60 * i, 125.f + 50 * j));
 
                     for (int i = 0; i < 10; i++)
                         for (int j = 0; j < 5; j++)
@@ -666,7 +767,7 @@ int main() {
                     int x_coor = rand() % 10, y_coor = rand() % 5;
                     while (!(dynamic_cast <Enemy*> (enemies[x_coor][y_coor]))->isAlive())
                         x_coor = rand() % 10, y_coor = rand() % 5;
-                    enemyMi = new Missile(Vector2f(enemies[x_coor][y_coor]->getPosition().x + 7, enemies[x_coor][y_coor]->getPosition().y), t4, Vector2f(0.05f, 0.05f));
+                    enemyMi = new Missile(Vector2f(enemies[x_coor][y_coor]->getPosition().x + 7, enemies[x_coor][y_coor]->getPosition().y), t4, Vector2f(0.3f, 0.3f));
                     enemyM.push_back(enemyMi);
                     c2.restart();
                     testMissiles++;
@@ -695,32 +796,12 @@ int main() {
     return 0;
 }
 
-/****************************************************************
-* Function: delay()                                             *
-* Date Created: 4/17/2021                                       *
-* Date Last Modified: 4/17/2021                                 *
-* Description: pauses the program for some miliseconds.         *
-* Input parameters: miliseconds as int                          *
-* Returns: Nothing                                              *
-* Preconditions: miliseconds as int                             *
-* Postconditions: the program has been delayed for some time    *
-*****************************************************************/
 void delay(int x) {
     clock_t time = clock();
     while (clock() < time + x)
         ;
 }
 
-/****************************************************************
-* Function: ship_movement()                                     *
-* Date Created: 4/17/2021                                       *
-* Date Last Modified: 4/17/2021                                 *
-* Description: Moves the ship                                   *
-* Input parameters: Character&, RenderWindow&                   *
-* Returns: Nothing                                              *
-* Preconditions: Character&, RenderWindow&                      *
-* Postconditions: The ship has been moved.                      *
-*****************************************************************/
 void ship_movement(Character& ship, RenderWindow& window) {
     if (ship.getPosition().x + 105 != window.getSize().x && (Keyboard::isKeyPressed(Keyboard::Right) || Keyboard::isKeyPressed(Keyboard::D)))
         ship.move(0.5, 0);
@@ -729,39 +810,23 @@ void ship_movement(Character& ship, RenderWindow& window) {
         ship.move(-0.5, 0);
 }
 
-/****************************************************************
-* Function: missile_movement()                                  *
-* Date Created: 4/17/2021                                       *
-* Date Last Modified: 4/17/2021                                 *
-* Description: Moves the user and enemy missiles                *
-* Input parameters: vector<Missile*>&, vector<Missile*>&        *
-* Returns: Nothing                                              *
-* Preconditions: vector<Missile*>&, vector<Missile*>&           *
-* Postconditions: The missiles have been moved                  *
-*****************************************************************/
 void missile_movement(vector<Missile*>& missiles, vector<Missile*>& enemyM)
 {
-    if (!missiles.empty()) {
-        for (int i = 0; i < missiles.size(); i++)
+    for (size_t i = 0; i < missiles.size(); i++) {
+        if (missiles.at(i)->tieneVelocidad())
+            missiles.at(i)->move(missiles.at(i)->velocidad); //Misil en diagonal
+        else
             missiles.at(i)->move(Vector2f(0.f, -0.5f));
     }
 
-    if (!enemyM.empty()) {
-        for (int i = 0; i < enemyM.size(); i++)
+    for (size_t i = 0; i < enemyM.size(); i++) {
+        if (enemyM.at(i)->tieneVelocidad())
+            enemyM.at(i)->move(enemyM.at(i)->velocidad); //Misil en diagonal / apuntado
+        else
             enemyM.at(i)->move(Vector2f(0.f, 0.5f));
     }
 }
 
-/****************************************************************
-* Function: draw_missiles()                                     *
-* Date Created: 4/17/2021                                       *
-* Date Last Modified: 4/17/2021                                 *
-* Description: Draws the user and enemy missiles                *
-* Input parameters: 2x vector<Missile*>&, RenderWindow&         *
-* Returns: Nothing                                              *
-* Preconditions: 2x vector<Missile*>&, RenderWindow&            *
-* Postconditions: The missiles have been drawn                  *
-*****************************************************************/
 void draw_missiles(vector<Missile*>& missiles, vector<Missile*>& enemyM, RenderWindow& window)
 {
     if (!missiles.empty()) {

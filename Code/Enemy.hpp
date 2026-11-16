@@ -1,11 +1,3 @@
-/************************************************************************
-* Programmers: Subham, Ryan, Danielle, Manjesh                          *
-* Class: CptS 122                                                       *
-* Programming Assignment: PA 9 - Space Invaders                         *
-* Date: 4/17/2021                                                       *
-* Description: This program emulates space invaders.                    *
-************************************************************************/
-
 #pragma once
 
 #include "Character.hpp"
@@ -15,11 +7,18 @@ class Enemy : public Character
 public:
 	Enemy(const Vector2f& pos, const Texture& texture, const Vector2f& scale) : Character(pos, texture, scale) {
 		alive = true;
+		pasoAlterno = false;
+		// Centrar el origen para que rote sobre su centro
+		Vector2u size = texture.getSize();
+		setOrigin(size.x / 2.f, size.y / 2.f);
 	}
 	bool isAlive();
 	void kill();
 	void reset();
+	void animar(int desfase);
 
 private:
 	bool alive;
+	bool pasoAlterno;
+	Clock animClock;
 };

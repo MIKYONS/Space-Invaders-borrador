@@ -52,3 +52,16 @@ void Enemy::reset()
 {
 	alive = true;
 }
+
+void Enemy::animar(int desfase)
+{
+	if (!alive) return;
+
+	if (animClock.getElapsedTime().asSeconds() >= 0.35f) {
+		pasoAlterno = !pasoAlterno;
+		float angulo = pasoAlterno ? 8.f : -8.f;
+		if (desfase % 2 == 0) angulo = -angulo; // Efecto ola entre columnas
+		setRotation(angulo);
+		animClock.restart();
+	}
+}
